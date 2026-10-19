@@ -27,7 +27,7 @@
                 <span id="conn-status" class="text-slate-300 font-medium">Menghubungkan...</span>
             </div>
             <div class="h-4 w-[1px] bg-slate-800"></div>
-            <div class="text-slate-400 text-xs">IP ESP32: <span id="esp-ip" class="text-cyan-400 font-mono">192.168.1.50</span></div>
+            <div class="text-slate-400 text-xs">Update terakhir: <span id="last-update" class="text-cyan-400 font-mono">-</span></div>
         </div>
     </header>
 
@@ -53,15 +53,11 @@
             </div>
 
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Pengaturan Koneksi ESP32</h3>
-                <div class="space-y-3">
-                    <div>
-                        <label class="text-xs text-slate-400 block mb-1">Alamat IP ESP32 Anda</label>
-                        <input type="text" id="target-ip" value="192.168.1.50" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-cyan-400 focus:outline-none focus:border-cyan-500 font-mono">
-                    </div>
-                    <button onclick="updateEspIp()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-lg shadow-cyan-900/20">
-                        Simpan & Hubungkan
-                    </button>
+                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Koneksi ESP32</h3>
+                <div class="space-y-2 text-xs text-slate-400">
+                    <p>ESP32 mengirim data ke endpoint:</p>
+                    <code id="endpoint-url" class="block w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-cyan-400 font-mono break-all">/api/sensor</code>
+                    <p>Status pompa saat ini: <span id="pump-status" class="font-semibold text-slate-200">-</span></p>
                 </div>
             </div>
         </div>
@@ -97,21 +93,35 @@
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex-1 flex flex-col">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Grafik Tren Level Air (%)</h3>
-                    <span class="text-xs text-slate-500">Update setiap 3 detik</span>
+                    <span class="text-xs text-slate-500">Update setiap 5 detik</span>
                 </div>
                 <div class="relative flex-1 w-full min-h-[240px]">
                     <canvas id="waterChart"></canvas>
                 </div>
             </div>
 
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex items-center justify-between flex-wrap gap-4">
-                <div>
-                    <h4 class="text-sm font-semibold text-slate-200">Kontrol Pompa / Reset Sistem</h4>
-                    <p class="text-xs text-slate-400">Kirim perintah langsung ke mikrokontroler ESP32.</p>
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Tabel Data Sensor</h3>
+                    <span id="table-count" class="text-xs text-slate-500">0 data</span>
                 </div>
-                <div class="flex gap-3">
-                    <button onclick="sendCommand('pump_on')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-lg">Nyalakan Pompa</button>
-                    <button onclick="sendCommand('pump_off')" class="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-lg">Matikan Pompa</button>
+                <div class="overflow-x-auto max-h-96 overflow-y-auto rounded-lg border border-slate-800">
+                    <table class="w-full text-sm text-left">
+                        <thead class="bg-slate-950 text-xs text-slate-400 uppercase sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3">No</th>
+                                <th class="px-4 py-3">Waktu</th>
+                                <th class="px-4 py-3 text-right">Level (%)</th>
+                                <th class="px-4 py-3 text-right">Kedalaman (cm)</th>
+                                <th class="px-4 py-3 text-right">Volume (L)</th>
+                                <th class="px-4 py-3 text-right">RSSI (dBm)</th>
+                                <th class="px-4 py-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="data-table" class="divide-y divide-slate-800">
+                            <tr><td colspan="7" class="px-4 py-6 text-center text-slate-500">Belum ada data</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
@@ -120,16 +130,13 @@
     </main>
 
     <script>
-        let espIp = "192.168.1.50";
+        // Base URL API (kosong = domain yang sama dengan dashboard, mis. https://xxx.vercel.app)
+        const API_BASE = '';
+        const POLL_INTERVAL = 5000;      // ms
+        const CHART_POINTS = 30;
+        const OFFLINE_AFTER_MS = 60000;  // dianggap offline jika data terakhir > 60 detik
 
-        function updateEspIp() {
-            const inputVal = document.getElementById('target-ip').value.trim();
-            if(inputVal) {
-                espIp = inputVal;
-                document.getElementById('esp-ip').innerText = espIp;
-                alert("IP ESP32 berhasil diperbarui ke: " + espIp);
-            }
-        }
+        document.getElementById('endpoint-url').innerText = `${location.origin}${API_BASE}/api/sensor`;
 
         // Setup Chart.js
         const ctx = document.getElementById('waterChart').getContext('2d');
@@ -166,80 +173,118 @@
             }
         });
 
-        function updateChart(time, value) {
-            if (waterChart.data.labels.length > 15) {
-                waterChart.data.labels.shift();
-                waterChart.data.datasets[0].data.shift();
+        function setConnection(state, text) {
+            const colors = { online: 'bg-emerald-500 animate-pulse', stale: 'bg-amber-500', offline: 'bg-rose-500' };
+            document.getElementById('conn-dot').className = `w-3 h-3 rounded-full ${colors[state]}`;
+            document.getElementById('conn-status').innerText = text;
+        }
+
+        function renderLatest(data) {
+            const percent = data.water_level_percent ?? 0;
+            document.getElementById('tank-water').style.height = Math.min(Math.max(percent, 0), 100) + '%';
+            document.getElementById('water-percent-text').innerText = percent + '%';
+            document.getElementById('val-depth').innerHTML = `${data.water_depth_cm ?? 0} <span class="text-sm font-normal text-slate-400">cm</span>`;
+            document.getElementById('val-volume').innerHTML = `${data.volume_liters ?? 0} <span class="text-sm font-normal text-slate-400">Liter</span>`;
+            document.getElementById('val-rssi').innerHTML = `${data.rssi ?? 0} <span class="text-sm font-normal text-slate-400">dBm</span>`;
+            document.getElementById('last-update').innerText = new Date(data.timestamp).toLocaleString();
+
+            // Status Label Tangki
+            const statusLabel = document.getElementById('tank-status-label');
+            if (percent > 85) {
+                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
+                statusLabel.innerText = "Bahaya: Penuh!";
+            } else if (percent < 20) {
+                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30";
+                statusLabel.innerText = "Peringatan: Air Rendah";
+            } else {
+                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+                statusLabel.innerText = "Normal / Aman";
             }
-            waterChart.data.labels.push(time);
-            waterChart.data.datasets[0].data.push(value);
+        }
+
+        function renderChart(records) {
+            const ordered = [...records].reverse(); // API mengirim terbaru dulu
+            waterChart.data.labels = ordered.map(r => new Date(r.timestamp).toLocaleTimeString());
+            waterChart.data.datasets[0].data = ordered.map(r => r.water_level_percent);
             waterChart.update();
         }
 
-        // Fungsi mengambil data sensor secara periodik dari ESP32
+        function levelStatus(percent) {
+            if (percent > 85) return '<span class="px-2 py-0.5 rounded-full text-xs bg-rose-500/20 text-rose-400">Penuh</span>';
+            if (percent < 20) return '<span class="px-2 py-0.5 rounded-full text-xs bg-amber-500/20 text-amber-400">Rendah</span>';
+            return '<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">Normal</span>';
+        }
+
+        function renderTable(records) {
+            const fmt = (v) => (v === null || v === undefined ? '-' : v);
+            document.getElementById('table-count').innerText = `${records.length} data terakhir`;
+            document.getElementById('data-table').innerHTML = records.map((r, i) => `
+                <tr class="hover:bg-slate-800/50">
+                    <td class="px-4 py-2 text-slate-500">${i + 1}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-slate-300 whitespace-nowrap">${new Date(r.timestamp).toLocaleString()}</td>
+                    <td class="px-4 py-2 text-right font-semibold text-cyan-400">${fmt(r.water_level_percent)}</td>
+                    <td class="px-4 py-2 text-right">${fmt(r.water_depth_cm)}</td>
+                    <td class="px-4 py-2 text-right">${fmt(r.volume_liters)}</td>
+                    <td class="px-4 py-2 text-right">${fmt(r.rssi)}</td>
+                    <td class="px-4 py-2">${levelStatus(r.water_level_percent ?? 0)}</td>
+                </tr>`).join('');
+        }
+
+        // Ambil data sensor yang tersimpan di Vercel
         async function fetchSensorData() {
-            const connDot = document.getElementById('conn-dot');
-            const connStatus = document.getElementById('conn-status');
-
             try {
-                // Mengambil data dari endpoint ESP32 (contoh: http://192.168.1.50/data)
-                const response = await fetch(`http://${espIp}/data`, { mode: 'cors', signal: AbortSignal.timeout(3000) });
-                if (!response.ok) throw new Error("Gagal terhubung ke ESP32");
-                
-                const data = await response.json();
+                const response = await fetch(`${API_BASE}/api/sensor/history?limit=${CHART_POINTS}`, { signal: AbortSignal.timeout(5000) });
+                if (!response.ok) throw new Error('Gagal mengambil data');
+                const { records } = await response.json();
 
-                // Ubah indikator menjadi Terhubung (Hijau)
-                connDot.className = "w-3 h-3 rounded-full bg-emerald-500 animate-pulse";
-                connStatus.innerText = "Terhubung (Live)";
-
-                // Update UI Elemen
-                const percent = data.water_level_percent || 0;
-                document.getElementById('tank-water').style.height = percent + '%';
-                document.getElementById('water-percent-text').innerText = percent + '%';
-                document.getElementById('val-depth').innerHTML = `${data.water_depth_cm || 0} <span class="text-sm font-normal text-slate-400">cm</span>`;
-                document.getElementById('val-volume').innerHTML = `${data.volume_liters || 0} <span class="text-sm font-normal text-slate-400">Liter</span>`;
-                document.getElementById('val-rssi').innerHTML = `${data.rssi || 0} <span class="text-sm font-normal text-slate-400">dBm</span>`;
-
-                // Status Label Tangki
-                const statusLabel = document.getElementById('tank-status-label');
-                if(percent > 85) {
-                    statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
-                    statusLabel.innerText = "Bahaya: Penuh!";
-                } else if(percent < 20) {
-                    statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30";
-                    statusLabel.innerText = "Peringatan: Air Rendah";
-                } else {
-                    statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-                    statusLabel.innerText = "Normal / Aman";
+                if (!records || records.length === 0) {
+                    setConnection('stale', 'Belum ada data dari ESP32');
+                    return;
                 }
 
-                // Update Grafik dengan waktu saat ini
-                const timeString = new Date().toLocaleTimeString();
-                updateChart(timeString, percent);
+                renderLatest(records[0]);
+                renderChart(records);
+                renderTable(records);
 
+                const age = Date.now() - new Date(records[0].timestamp).getTime();
+                if (age > OFFLINE_AFTER_MS) setConnection('stale', 'ESP32 tidak mengirim data');
+                else setConnection('online', 'Terhubung (Live)');
             } catch (error) {
-                // Jika gagal terhubung, ubah indikator jadi Merah
-                connDot.className = "w-3 h-3 rounded-full bg-rose-500";
-                connStatus.innerText = "Terputus (Offline / Simulasi)";
+                setConnection('offline', 'Server tidak dapat dihubungi');
             }
         }
 
-        // Fungsi mengirim perintah kontrol ke ESP32
+        async function fetchPumpStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/pump/status`);
+                const { pump_command } = await response.json();
+                document.getElementById('pump-status').innerText = pump_command === 'pump_on' ? 'MENYALA' : 'MATI';
+            } catch (e) { /* abaikan */ }
+        }
+
+        // Kirim perintah pompa ke server; ESP32 menerimanya saat mengirim data berikutnya
         async function sendCommand(cmd) {
             try {
-                const response = await fetch(`http://${espIp}/control?action=${cmd}`, { mode: 'cors' });
-                if(response.ok) {
-                    alert("Perintah berhasil dikirim ke ESP32: " + cmd);
+                const response = await fetch(`${API_BASE}/api/pump/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: cmd })
+                });
+                if (response.ok) {
+                    fetchPumpStatus();
+                    alert("Perintah disimpan: " + cmd + "\nESP32 akan menjalankannya saat sinkronisasi berikutnya.");
                 } else {
-                    alert("ESP32 menolak perintah.");
+                    alert("Server menolak perintah.");
                 }
-            } catch(e) {
-                alert("Gagal mengirim perintah. Pastikan ESP32 aktif di IP: " + espIp);
+            } catch (e) {
+                alert("Gagal mengirim perintah ke server.");
             }
         }
 
-        // Jalankan polling setiap 3 detik
-        setInterval(fetchSensorData, 3000);
+        fetchSensorData();
+        fetchPumpStatus();
+        setInterval(fetchSensorData, POLL_INTERVAL);
+        setInterval(fetchPumpStatus, POLL_INTERVAL * 2);
     </script>
 </body>
 </html>
