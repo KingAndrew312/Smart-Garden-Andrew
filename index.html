@@ -3,288 +3,374 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Water Level Monitoring</title>
+    <title>Smart Garden – Monitoring Tanah, Tandon & Pompa ESP32</title>
+    <meta name="description" content="Dashboard Smart Garden berbasis ESP32 dan MQTT: pantau kelembapan tanah, air tandon, dan status pompa secara real-time, serta kontrol penyiraman otomatis atau manual.">
+    <meta name="keywords" content="smart garden, ESP32, MQTT, IoT, kelembapan tanah, soil moisture, penyiraman otomatis, pompa air, monitoring tanaman">
+    <meta name="author" content="Smart Garden">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="canonical" href="https://smart-garden-andrew.vercel.app/">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
+
+    <!-- Open Graph / media sosial -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Garden">
+    <meta property="og:locale" content="id_ID">
+    <meta property="og:url" content="https://smart-garden-andrew.vercel.app/">
+    <meta property="og:title" content="Smart Garden – Monitoring Tanah, Tandon & Pompa ESP32">
+    <meta property="og:description" content="Pantau kelembapan tanah, air tandon, dan pompa secara real-time lewat ESP32 + MQTT.">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Smart Garden – Monitoring Tanah, Tandon & Pompa ESP32">
+    <meta name="twitter:description" content="Pantau kelembapan tanah, air tandon, dan pompa secara real-time lewat ESP32 + MQTT.">
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Smart Garden",
+        "url": "https://smart-garden-andrew.vercel.app/",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "id",
+        "description": "Dashboard IoT untuk memantau kelembapan tanah, air tandon, dan pompa penyiraman berbasis ESP32 dan MQTT."
+    }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
 
     <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
         <div class="flex items-center gap-3">
-            <div class="bg-cyan-500/10 p-2.5 rounded-xl border border-cyan-500/20 text-cyan-400">
-                <i class="fa-solid fa-water text-xl"></i>
+            <div class="bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20 text-emerald-400">
+                <i class="fa-solid fa-seedling text-xl"></i>
             </div>
             <div>
-                <h1 class="text-lg font-bold tracking-wide">ESP32 Water Level Monitor</h1>
-                <p class="text-xs text-slate-400">Sistem Pemantauan Level Air Real-Time</p>
+                <h1 class="text-lg font-bold tracking-wide">Smart Garden</h1>
+                <p class="text-xs text-slate-400">Monitoring tanah, tandon & pompa via MQTT</p>
             </div>
+            <nav class="flex gap-1 ml-4 text-sm">
+                <a href="index.html" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold"><i class="fa-solid fa-gauge mr-1"></i>Dashboard</a>
+                <a href="data.html" class="px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800"><i class="fa-solid fa-table mr-1"></i>Tabel Data</a>
+            </nav>
         </div>
 
-        <div class="flex items-center gap-4 bg-slate-950 px-4 py-2 rounded-lg border border-slate-800 text-sm">
+        <div class="flex flex-wrap items-center justify-center gap-4 bg-slate-950 px-4 py-2 rounded-lg border border-slate-800 text-sm">
             <div class="flex items-center gap-2">
-                <span id="conn-dot" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
-                <span id="conn-status" class="text-slate-300 font-medium">Menghubungkan...</span>
+                <span id="mqtt-dot" class="w-3 h-3 rounded-full bg-rose-500 animate-pulse"></span>
+                <span id="mqtt-status" class="text-slate-300 font-medium">Menghubungkan MQTT...</span>
             </div>
             <div class="h-4 w-[1px] bg-slate-800"></div>
-            <div class="text-slate-400 text-xs">Update terakhir: <span id="last-update" class="text-cyan-400 font-mono">-</span></div>
+            <div class="flex items-center gap-2">
+                <span id="esp-dot" class="w-3 h-3 rounded-full bg-slate-600"></span>
+                <span id="esp-status" class="text-slate-300 font-medium">ESP32: menunggu data</span>
+            </div>
+            <div class="h-4 w-[1px] bg-slate-800"></div>
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-database text-slate-500"></i>
+                <span id="db-status" class="text-slate-400 text-xs">Database: mengecek...</span>
+            </div>
         </div>
     </header>
+
+    <div id="alarm" class="hidden max-w-7xl w-full mx-auto px-6 pt-6">
+        <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl px-4 py-3 text-sm flex items-center gap-3">
+            <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+            <span><b>Peringatan:</b> air tandon habis dan tanah kering. Pompa tidak bisa menyiram, segera isi tandon.</span>
+        </div>
+    </div>
 
     <main class="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         <div class="space-y-6">
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col items-center">
-                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6 w-full text-left">Visualisasi Tangki</h2>
-                
-                <div class="relative w-40 h-64 bg-slate-950 rounded-2xl border-2 border-slate-700 overflow-hidden shadow-inner flex flex-col justify-end">
-                    <div id="tank-water" class="w-full bg-gradient-to-t from-cyan-600 to-cyan-400 transition-all duration-700 relative" style="height: 0%;">
-                        <div class="absolute top-0 w-full h-2 bg-cyan-200/50 animate-pulse"></div>
-                    </div>
-                    <div class="absolute inset-0 flex items-center justify-center">
-                        <span id="water-percent-text" class="text-3xl font-extrabold text-white drop-shadow-md">0%</span>
+                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6 w-full text-left">Kelembapan Tanah</h2>
+                <div class="relative w-44 h-44">
+                    <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+                        <circle cx="60" cy="60" r="52" fill="none" stroke="#1e293b" stroke-width="12"/>
+                        <circle id="soil-ring" cx="60" cy="60" r="52" fill="none" stroke="#10b981" stroke-width="12"
+                                stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"
+                                style="transition: stroke-dashoffset .7s, stroke .7s"/>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span id="soil-percent" class="text-4xl font-extrabold">-</span>
+                        <span class="text-xs text-slate-400">raw <span id="soil-raw">-</span></span>
                     </div>
                 </div>
-
-                <div class="mt-6 text-center">
-                    <p class="text-xs text-slate-400">Status Ketinggian Tangki</p>
-                    <span id="tank-status-label" class="inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">Menganalisis...</span>
-                </div>
+                <span id="soil-label" class="inline-block mt-5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">Menunggu data</span>
+                <p class="text-xs text-slate-500 mt-2">Batas kering &lt; 35%</p>
             </div>
 
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Koneksi ESP32</h3>
-                <div class="space-y-2 text-xs text-slate-400">
-                    <p>ESP32 mengirim data ke endpoint:</p>
-                    <code id="endpoint-url" class="block w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-cyan-400 font-mono break-all">/api/sensor</code>
-                    <p>Status pompa saat ini: <span id="pump-status" class="font-semibold text-slate-200">-</span></p>
+                <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Kontrol Pompa</h3>
+                <div class="grid grid-cols-3 gap-2">
+                    <button data-cmd="auto" onclick="sendCommand('auto')" class="cmd-btn px-3 py-2.5 rounded-lg text-sm font-semibold border transition disabled:opacity-40">
+                        <i class="fa-solid fa-robot mr-1"></i>Auto
+                    </button>
+                    <button data-cmd="pump_on" onclick="sendCommand('pump_on')" class="cmd-btn px-3 py-2.5 rounded-lg text-sm font-semibold border transition disabled:opacity-40">
+                        <i class="fa-solid fa-power-off mr-1"></i>ON
+                    </button>
+                    <button data-cmd="pump_off" onclick="sendCommand('pump_off')" class="cmd-btn px-3 py-2.5 rounded-lg text-sm font-semibold border transition disabled:opacity-40">
+                        <i class="fa-solid fa-ban mr-1"></i>OFF
+                    </button>
                 </div>
+                <p class="text-xs text-slate-500 mt-3">Perintah dikirim ke topik <code class="text-emerald-400">binus/garden/pump/cmd</code>. Mode ON manual menyalakan pompa terus sampai diganti Auto/OFF.</p>
+                <p id="cmd-feedback" class="text-xs text-amber-400 mt-2 hidden"></p>
             </div>
         </div>
 
         <div class="lg:col-span-2 space-y-6 flex flex-col">
-            
+
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
-                    <div class="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20"><i class="fa-solid fa-ruler-vertical text-xl"></i></div>
+                    <div id="water-icon" class="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20"><i class="fa-solid fa-bucket text-xl"></i></div>
                     <div>
-                        <p class="text-xs text-slate-400">Kedalaman Air</p>
-                        <h4 id="val-depth" class="text-xl font-bold text-slate-100">0 <span class="text-sm font-normal text-slate-400">cm</span></h4>
+                        <p class="text-xs text-slate-400">Air Tandon</p>
+                        <h4 id="val-water" class="text-xl font-bold">-</h4>
+                        <p class="text-xs text-slate-500">water_raw: <span id="val-water-raw">-</span> <span class="text-slate-600">(1 = ada, 0 = habis)</span></p>
                     </div>
                 </div>
 
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
-                    <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20"><i class="fa-solid fa-droplet text-xl"></i></div>
+                    <div id="pump-icon" class="p-3 bg-slate-500/10 text-slate-400 rounded-xl border border-slate-500/20"><i class="fa-solid fa-faucet-drip text-xl"></i></div>
                     <div>
-                        <p class="text-xs text-slate-400">Estimasi Volume</p>
-                        <h4 id="val-volume" class="text-xl font-bold text-slate-100">0 <span class="text-sm font-normal text-slate-400">Liter</span></h4>
+                        <p class="text-xs text-slate-400">Pompa</p>
+                        <h4 id="val-pump" class="text-xl font-bold">-</h4>
+                        <p class="text-xs text-slate-500">Relay D23: <span id="val-relay">-</span></p>
                     </div>
                 </div>
 
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
-                    <div class="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20"><i class="fa-solid fa-wifi text-xl"></i></div>
-                    <div>
-                        <p class="text-xs text-slate-400">Sinyal Wi-Fi (RSSI)</p>
-                        <h4 id="val-rssi" class="text-xl font-bold text-slate-100">0 <span class="text-sm font-normal text-slate-400">dBm</span></h4>
+                    <div class="p-3 bg-violet-500/10 text-violet-400 rounded-xl border border-violet-500/20"><i class="fa-solid fa-microchip text-xl"></i></div>
+                    <div class="min-w-0">
+                        <p class="text-xs text-slate-400">Perangkat</p>
+                        <h4 id="val-device" class="text-base font-bold truncate">-</h4>
+                        <p class="text-xs text-slate-500 truncate">Tanaman: <span id="val-tanaman">-</span></p>
                     </div>
                 </div>
             </div>
 
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex-1 flex flex-col">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Grafik Tren Level Air (%)</h3>
-                    <span class="text-xs text-slate-500">Update setiap 5 detik</span>
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Grafik Kelembapan Tanah & Pompa</h3>
+                    <span class="text-xs text-slate-500">Update terakhir: <span id="last-update" class="text-emerald-400 font-mono">-</span></span>
                 </div>
-                <div class="relative flex-1 w-full min-h-[240px]">
-                    <canvas id="waterChart"></canvas>
+                <div class="relative flex-1 w-full min-h-[280px]">
+                    <canvas id="soilChart"></canvas>
                 </div>
             </div>
 
-            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Tabel Data Sensor</h3>
-                    <span id="table-count" class="text-xs text-slate-500">0 data</span>
+            <a href="data.html" class="bg-slate-900 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-5 shadow-xl flex items-center justify-between gap-4 transition">
+                <div class="flex items-center gap-4">
+                    <div class="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20"><i class="fa-solid fa-table text-xl"></i></div>
+                    <div>
+                        <p class="font-semibold">Tabel Data Sensor</p>
+                        <p class="text-xs text-slate-400">Semua riwayat data dengan pencarian, filter, pagination & download CSV/JSON</p>
+                    </div>
                 </div>
-                <div class="overflow-x-auto max-h-96 overflow-y-auto rounded-lg border border-slate-800">
-                    <table class="w-full text-sm text-left">
-                        <thead class="bg-slate-950 text-xs text-slate-400 uppercase sticky top-0">
-                            <tr>
-                                <th class="px-4 py-3">No</th>
-                                <th class="px-4 py-3">Waktu</th>
-                                <th class="px-4 py-3 text-right">Level (%)</th>
-                                <th class="px-4 py-3 text-right">Kedalaman (cm)</th>
-                                <th class="px-4 py-3 text-right">Volume (L)</th>
-                                <th class="px-4 py-3 text-right">RSSI (dBm)</th>
-                                <th class="px-4 py-3">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="data-table" class="divide-y divide-slate-800">
-                            <tr><td colspan="7" class="px-4 py-6 text-center text-slate-500">Belum ada data</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+                <i class="fa-solid fa-arrow-right text-slate-400"></i>
+            </a>
 
         </div>
 
     </main>
 
+    <script src="js/common.js"></script>
     <script>
-        // Base URL API (kosong = domain yang sama dengan dashboard, mis. https://xxx.vercel.app)
-        const API_BASE = '';
-        const POLL_INTERVAL = 5000;      // ms
+        // HiveMQ public broker lewat WebSocket (wss supaya jalan di https / Vercel)
+        const MQTT_WS_URL = 'wss://broker.hivemq.com:8884/mqtt';
+        const TOPIC_DATA = 'binus/garden/sensor/data';
+        const TOPIC_CMD = 'binus/garden/pump/cmd';
+
         const CHART_POINTS = 30;
-        const OFFLINE_AFTER_MS = 60000;  // dianggap offline jika data terakhir > 60 detik
+        const OFFLINE_AFTER_MS = 30000;  // ESP32 publish tiap 10 detik
 
-        document.getElementById('endpoint-url').innerText = `${location.origin}${API_BASE}/api/sensor`;
+        let records = [];        // data terbaru untuk kartu & grafik, terbaru dulu
+        let mqttClient = null;
+        let pendingCommand = null;
 
-        // Setup Chart.js
-        const ctx = document.getElementById('waterChart').getContext('2d');
-        const waterChart = new Chart(ctx, {
+        // ===== Chart =====
+        const soilChart = new Chart($('soilChart').getContext('2d'), {
             type: 'line',
             data: {
                 labels: [],
-                datasets: [{
-                    label: 'Level Air (%)',
-                    data: [],
-                    borderColor: '#06b6d4',
-                    backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                    borderWidth: 2,
-                    fill: true,
-                    tension: 0.4
-                }]
+                datasets: [
+                    {
+                        label: 'Kelembapan Tanah (%)',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Pompa ON',
+                        data: [],
+                        borderColor: 'rgba(6, 182, 212, 0.6)',
+                        backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                        borderWidth: 1,
+                        fill: true,
+                        stepped: true,
+                        pointRadius: 0
+                    },
+                    {
+                        label: 'Batas Kering',
+                        data: [],
+                        borderColor: 'rgba(244, 63, 94, 0.6)',
+                        borderDash: [6, 4],
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false
+                    }
+                ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false,
                 scales: {
-                    y: {
-                        min: 0,
-                        max: 100,
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#94a3b8' }
-                    },
-                    x: {
-                        grid: { display: false },
-                        ticks: { color: '#94a3b8' }
-                    }
+                    y: { min: 0, max: 100, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                    x: { grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 8 } }
                 },
-                plugins: { legend: { display: false } }
+                plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12 } } }
             }
         });
 
-        function setConnection(state, text) {
-            const colors = { online: 'bg-emerald-500 animate-pulse', stale: 'bg-amber-500', offline: 'bg-rose-500' };
-            document.getElementById('conn-dot').className = `w-3 h-3 rounded-full ${colors[state]}`;
-            document.getElementById('conn-status').innerText = text;
+        // ===== Status di header =====
+        const DOT = { online: 'bg-emerald-500 animate-pulse', stale: 'bg-amber-500', offline: 'bg-rose-500' };
+        function setMqtt(state, text) {
+            $('mqtt-dot').className = `w-3 h-3 rounded-full ${DOT[state]}`;
+            $('mqtt-status').innerText = text;
+        }
+        function updateEspStatus() {
+            if (!records.length) return;
+            const age = Date.now() - new Date(records[0].timestamp).getTime();
+            const online = age <= OFFLINE_AFTER_MS;
+            $('esp-dot').className = `w-3 h-3 rounded-full ${online ? DOT.online : DOT.stale}`;
+            $('esp-status').innerText = online ? 'ESP32: online' : `ESP32: tidak mengirim data (${Math.round(age / 1000)} dtk)`;
         }
 
-        function renderLatest(data) {
-            const percent = data.water_level_percent ?? 0;
-            document.getElementById('tank-water').style.height = Math.min(Math.max(percent, 0), 100) + '%';
-            document.getElementById('water-percent-text').innerText = percent + '%';
-            document.getElementById('val-depth').innerHTML = `${data.water_depth_cm ?? 0} <span class="text-sm font-normal text-slate-400">cm</span>`;
-            document.getElementById('val-volume').innerHTML = `${data.volume_liters ?? 0} <span class="text-sm font-normal text-slate-400">Liter</span>`;
-            document.getElementById('val-rssi').innerHTML = `${data.rssi ?? 0} <span class="text-sm font-normal text-slate-400">dBm</span>`;
-            document.getElementById('last-update').innerText = new Date(data.timestamp).toLocaleString();
+        // ===== Render =====
+        function renderLatest(r) {
+            const percent = Math.min(Math.max(Number(r.soil_percent) || 0, 0), 100);
+            const dry = r.is_soil_dry || percent < BATAS_KERING;
+            $('soil-percent').innerText = (r.soil_percent ?? '-') + '%';
+            $('soil-raw').innerText = r.soil_raw ?? '-';
+            $('soil-ring').style.strokeDashoffset = 326.7 * (1 - percent / 100);
+            $('soil-ring').style.stroke = dry ? '#f59e0b' : '#10b981';
+            $('soil-label').className = `inline-block mt-5 px-3 py-1 rounded-full text-xs font-semibold border ${dry
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'}`;
+            $('soil-label').innerText = dry ? 'Kering - perlu disiram' : 'Lembab / Aman';
 
-            // Status Label Tangki
-            const statusLabel = document.getElementById('tank-status-label');
-            if (percent > 85) {
-                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
-                statusLabel.innerText = "Bahaya: Penuh!";
-            } else if (percent < 20) {
-                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30";
-                statusLabel.innerText = "Peringatan: Air Rendah";
-            } else {
-                statusLabel.className = "inline-block mt-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-                statusLabel.innerText = "Normal / Aman";
+            const empty = isWaterEmpty(r);
+            $('val-water').innerText = empty ? 'HABIS' : 'ADA';
+            $('val-water').className = `text-xl font-bold ${empty ? 'text-rose-400' : 'text-cyan-400'}`;
+            $('val-water-raw').innerText = r.water_raw ?? '-';
+            $('water-icon').className = `p-3 rounded-xl border ${empty ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'}`;
+
+            const on = r.pump_status === 'ON';
+            $('val-pump').innerText = `${r.pump_status || '-'} · ${r.pump_command || '-'}`;
+            $('val-pump').className = `text-xl font-bold ${on ? 'text-cyan-400' : 'text-slate-200'}`;
+            $('val-relay').innerText = r.relay_d23 ? 'aktif' : 'mati';
+            $('pump-icon').className = `p-3 rounded-xl border ${on ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`;
+
+            $('val-device').innerText = r.device_id || '-';
+            $('val-tanaman').innerText = (r.tanaman || '-').replace(/_/g, ' ');
+            $('last-update').innerText = fmtTime(r.timestamp);
+
+            $('alarm').classList.toggle('hidden', !(empty && dry));
+
+            if (pendingCommand && r.pump_command === pendingCommand) {
+                pendingCommand = null;
+                $('cmd-feedback').classList.add('hidden');
             }
+            updateButtons(r.pump_command);
         }
 
-        function renderChart(records) {
-            const ordered = [...records].reverse(); // API mengirim terbaru dulu
-            waterChart.data.labels = ordered.map(r => new Date(r.timestamp).toLocaleTimeString());
-            waterChart.data.datasets[0].data = ordered.map(r => r.water_level_percent);
-            waterChart.update();
+        function renderChart() {
+            const ordered = records.slice(0, CHART_POINTS).reverse();
+            soilChart.data.labels = ordered.map((r) => new Date(r.timestamp).toLocaleTimeString());
+            soilChart.data.datasets[0].data = ordered.map((r) => r.soil_percent);
+            soilChart.data.datasets[1].data = ordered.map((r) => (r.pump_status === 'ON' ? 100 : 0));
+            soilChart.data.datasets[2].data = ordered.map(() => BATAS_KERING);
+            soilChart.update();
         }
 
-        function levelStatus(percent) {
-            if (percent > 85) return '<span class="px-2 py-0.5 rounded-full text-xs bg-rose-500/20 text-rose-400">Penuh</span>';
-            if (percent < 20) return '<span class="px-2 py-0.5 rounded-full text-xs bg-amber-500/20 text-amber-400">Rendah</span>';
-            return '<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-500/20 text-emerald-400">Normal</span>';
+        function renderAll() {
+            if (records.length) renderLatest(records[0]);
+            renderChart();
+            updateEspStatus();
         }
 
-        function renderTable(records) {
-            const fmt = (v) => (v === null || v === undefined ? '-' : v);
-            document.getElementById('table-count').innerText = `${records.length} data terakhir`;
-            document.getElementById('data-table').innerHTML = records.map((r, i) => `
-                <tr class="hover:bg-slate-800/50">
-                    <td class="px-4 py-2 text-slate-500">${i + 1}</td>
-                    <td class="px-4 py-2 font-mono text-xs text-slate-300 whitespace-nowrap">${new Date(r.timestamp).toLocaleString()}</td>
-                    <td class="px-4 py-2 text-right font-semibold text-cyan-400">${fmt(r.water_level_percent)}</td>
-                    <td class="px-4 py-2 text-right">${fmt(r.water_depth_cm)}</td>
-                    <td class="px-4 py-2 text-right">${fmt(r.volume_liters)}</td>
-                    <td class="px-4 py-2 text-right">${fmt(r.rssi)}</td>
-                    <td class="px-4 py-2">${levelStatus(r.water_level_percent ?? 0)}</td>
-                </tr>`).join('');
-        }
-
-        // Ambil data sensor yang tersimpan di Vercel
-        async function fetchSensorData() {
+        // ===== Data terbaru dari database (untuk isi awal kartu & grafik) =====
+        async function loadLatest() {
             try {
-                const response = await fetch(`${API_BASE}/api/sensor/history?limit=${CHART_POINTS}`, { signal: AbortSignal.timeout(5000) });
-                if (!response.ok) throw new Error('Gagal mengambil data');
-                const { records } = await response.json();
-
-                if (!records || records.length === 0) {
-                    setConnection('stale', 'Belum ada data dari ESP32');
-                    return;
-                }
-
-                renderLatest(records[0]);
-                renderChart(records);
-                renderTable(records);
-
-                const age = Date.now() - new Date(records[0].timestamp).getTime();
-                if (age > OFFLINE_AFTER_MS) setConnection('stale', 'ESP32 tidak mengirim data');
-                else setConnection('online', 'Terhubung (Live)');
-            } catch (error) {
-                setConnection('offline', 'Server tidak dapat dihubungi');
-            }
-        }
-
-        async function fetchPumpStatus() {
-            try {
-                const response = await fetch(`${API_BASE}/api/pump/status`);
-                const { pump_command } = await response.json();
-                document.getElementById('pump-status').innerText = pump_command === 'pump_on' ? 'MENYALA' : 'MATI';
-            } catch (e) { /* abaikan */ }
-        }
-
-        // Kirim perintah pompa ke server; ESP32 menerimanya saat mengirim data berikutnya
-        async function sendCommand(cmd) {
-            try {
-                const response = await fetch(`${API_BASE}/api/pump/command`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ command: cmd })
-                });
-                if (response.ok) {
-                    fetchPumpStatus();
-                    alert("Perintah disimpan: " + cmd + "\nESP32 akan menjalankannya saat sinkronisasi berikutnya.");
-                } else {
-                    alert("Server menolak perintah.");
-                }
+                const res = await fetch(`${API_BASE}/api/sensor/history?per_page=${CHART_POINTS}`, { signal: AbortSignal.timeout(8000) });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const body = await res.json();
+                records = body.records.map((r) => pick(r));
+                setDbStatus(body);
             } catch (e) {
-                alert("Gagal mengirim perintah ke server.");
+                setDbStatus(null);
             }
+            renderAll();
         }
 
-        fetchSensorData();
-        fetchPumpStatus();
-        setInterval(fetchSensorData, POLL_INTERVAL);
-        setInterval(fetchPumpStatus, POLL_INTERVAL * 2);
+        // ===== MQTT (data live & kontrol pompa) =====
+        function connectMqtt() {
+            if (!window.mqtt) { setMqtt('offline', 'Library MQTT gagal dimuat'); return; }
+            const clientId = 'dashboard-garden-' + Math.random().toString(16).slice(2, 10);
+            mqttClient = mqtt.connect(MQTT_WS_URL, { clientId, reconnectPeriod: 5000, connectTimeout: 10000 });
+
+            mqttClient.on('connect', () => {
+                setMqtt('online', 'MQTT terhubung');
+                mqttClient.subscribe(TOPIC_DATA);
+                updateButtons(records[0]?.pump_command);
+            });
+            mqttClient.on('reconnect', () => setMqtt('stale', 'MQTT menghubungkan ulang...'));
+            mqttClient.on('close', () => { setMqtt('offline', 'MQTT terputus'); updateButtons(records[0]?.pump_command); });
+
+            mqttClient.on('message', (topic, payload) => {
+                let data;
+                try { data = JSON.parse(payload.toString()); } catch { return; }
+                if (data.soil_percent === undefined) return;
+                records.unshift(pick(data, new Date().toISOString()));
+                records.length = Math.min(records.length, CHART_POINTS);
+                renderAll();
+            });
+        }
+
+        function updateButtons(active) {
+            const connected = Boolean(mqttClient?.connected);
+            document.querySelectorAll('.cmd-btn').forEach((btn) => {
+                const isActive = btn.dataset.cmd === active;
+                btn.disabled = !connected;
+                btn.className = `cmd-btn px-3 py-2.5 rounded-lg text-sm font-semibold border transition disabled:opacity-40 ${isActive
+                    ? 'bg-emerald-600 border-emerald-500 text-white'
+                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`;
+            });
+        }
+
+        function sendCommand(cmd) {
+            if (!mqttClient?.connected) { alert('MQTT belum terhubung.'); return; }
+            mqttClient.publish(TOPIC_CMD, cmd);
+            pendingCommand = cmd;
+            $('cmd-feedback').innerText = `Perintah "${cmd}" dikirim, menunggu konfirmasi dari ESP32...`;
+            $('cmd-feedback').classList.remove('hidden');
+        }
+
+        updateButtons();
+        loadLatest();
+        connectMqtt();
+        setInterval(updateEspStatus, 5000);
+        setInterval(() => fetch(`${API_BASE}/api/status`).then((r) => r.json()).then((s) => {
+            if (s.status === 'success') setDbStatus(s);
+        }).catch(() => {}), 30000);
     </script>
 </body>
 </html>

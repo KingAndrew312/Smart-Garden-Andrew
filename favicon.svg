@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="#10b981" stroke-opacity=".35" stroke-width="2"/>
+  <!-- batang -->
+  <path d="M32 52V30" stroke="#10b981" stroke-width="4" stroke-linecap="round"/>
+  <!-- daun kiri -->
+  <path d="M32 34C32 24 24 17 13 17c0 10 8 17 19 17z" fill="#10b981"/>
+  <!-- daun kanan -->
+  <path d="M32 30c0-9 7-16 19-16 0 10-8 16-19 16z" fill="#34d399"/>
+  <!-- tetes air -->
+  <path d="M46 40c-3 4-4.5 6.3-4.5 8.2a4.5 4.5 0 0 0 9 0C50.5 46.3 49 44 46 40z" fill="#22d3ee"/>
+</svg>

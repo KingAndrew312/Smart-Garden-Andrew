@@ -1,116 +1,37 @@
-# Smart Garden – ESP32 Water Level Monitor
+# Smart Garden – ESP32 + MQTT
 
 Dashboard: **https://smart-garden-andrew.vercel.app**
 
 Alur data:
 
 ```
-ESP32 --POST /api/sensor--> Vercel API --> Upstash Redis (penyimpanan)
-                                 ^
-Dashboard (browser) --GET /api/sensor/history-----+
+ESP32 --publish binus/garden/sensor/data--> broker.hivemq.com
+                                              |            |
+                       (WebSocket, live)      |            |  (TCP)
+                Dashboard (browser) <---------+            +---> MQTT listener (npm start / npm run listen)
+                       |  publish binus/garden/pump/cmd                 |
+                       v                                                v
+                     ESP32                                    MySQL database "peter"
+                                                                        |
+                Dashboard <--- GET /api/sensor/history, /api/sensor/export
 ```
 
-ESP32 yang **mengirim** data ke Vercel, karena server Vercel tidak bisa menjangkau IP lokal ESP32 (mis. `192.168.1.50`).
+- **Data live** & **kontrol pompa** (`auto` / `pump_on` / `pump_off`) langsung lewat MQTT dari browser.
+- **Penyimpanan**: listener MQTT menyimpan setiap data ke MySQL database `peter`, tabel `sensor_data`.
+- **Halaman**: `index.html` (dashboard live, grafik, kontrol pompa) dan `data.html` (tabel riwayat dengan pencarian, filter, pagination & download).
+- **Air tandon**: `water_raw` 1 = air ada, 0 = air habis (float switch).
+- **Tampil & download**: semua field ditampilkan dan bisa di-download (CSV / JSON) **kecuali data DHT11**
+  (`temperature`, `humidity`). Data DHT tetap tersimpan di database, hanya tidak ditampilkan / di-download.
 
-## Endpoint API
+> Vercel (serverless) tidak bisa menjalankan subscriber MQTT terus-menerus, jadi listener harus jalan di komputer/server
+> yang selalu menyala (mis. `npm start` di laptop dengan XAMPP).
 
-Base URL: `https://smart-garden-andrew.vercel.app`
+## Jalankan lokal (XAMPP)
 
-| Method | Endpoint | Dipakai oleh | Keterangan |
-|---|---|---|---|
-| POST | `/api/sensor` | ESP32 | Kirim data sensor, response berisi `pump_command` |
-| GET | `/api/sensor/latest` | Dashboard | Data sensor terbaru |
-| GET | `/api/sensor/history?limit=30` | Dashboard | Riwayat data (terbaru dulu, maks 1000) |
-| POST | `/api/pump/command` | Dashboard | Set perintah pompa (`pump_on` / `pump_off`) |
-| GET | `/api/pump/status` | ESP32 / Dashboard | Cek perintah pompa saat ini |
-
-### POST `/api/sensor`
-
-URL lengkap: `https://smart-garden-andrew.vercel.app/api/sensor`
-
-Header:
-```
-Content-Type: application/json
-```
-
-Body:
-```json
-{
-  "water_level_percent": 55,
-  "water_depth_cm": 30,
-  "volume_liters": 120,
-  "rssi": -60
-}
-```
-`water_level_percent` wajib, field lain opsional.
-
-Response:
-```json
-{ "status": "success", "message": "Data berhasil disimpan", "pump_command": "pump_off" }
-```
-
-### GET `/api/sensor/latest`
-
-```json
-{
-  "status": "success",
-  "record": {
-    "water_level_percent": 55,
-    "water_depth_cm": 30,
-    "volume_liters": 120,
-    "rssi": -60,
-    "timestamp": "2026-10-19T10:36:59.100Z"
-  }
-}
-```
-
-### GET `/api/sensor/history?limit=30`
-
-```json
-{ "status": "success", "records": [ { "...": "sama seperti record di atas" } ] }
-```
-
-### POST `/api/pump/command`
-
-Body:
-```json
-{ "command": "pump_on" }
-```
-
-### GET `/api/pump/status`
-
-```json
-{ "status": "success", "pump_command": "pump_on" }
-```
-
-## Tes cepat dengan curl
-
-```bash
-curl -X POST https://smart-garden-andrew.vercel.app/api/sensor \
-  -H "Content-Type: application/json" \
-  -d '{"water_level_percent":55,"water_depth_cm":30,"volume_liters":120,"rssi":-60}'
-
-curl https://smart-garden-andrew.vercel.app/api/sensor/latest
-```
-
-## Setup penyimpanan di Vercel (wajib)
-
-Tanpa database, data di Vercel hilang karena fungsi serverless tidak menyimpan memori antar-request.
-
-1. Buka project di Vercel → tab **Storage** → **Create Database** → pilih **Upstash (Redis)** → hubungkan ke project ini.
-2. Vercel otomatis menambahkan env var `KV_REST_API_URL` dan `KV_REST_API_TOKEN` (atau `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`; keduanya didukung).
-3. **Redeploy** project.
-
-## ESP32
-
-Contoh sketch: [esp32/esp32_sender/esp32_sender.ino](esp32/esp32_sender/esp32_sender.ino)
-
-- Isi `WIFI_SSID` dan `WIFI_PASSWORD`.
-- Ganti fungsi `readWaterLevelPercent()` dkk. dengan pembacaan sensor Anda.
-- Perintah pompa dari dashboard diterima ESP32 lewat response `pump_command` setiap kali mengirim data.
-- Interval default 15 detik. Upstash free tier punya batas jumlah perintah per bulan, jadi jangan mengirim terlalu sering.
-
-## Jalankan lokal
+1. Jalankan **MySQL** dari XAMPP Control Panel.
+2. (Opsional) import [database/peter.sql](database/peter.sql) lewat phpMyAdmin. Kalau tidak, database `peter` dan tabelnya dibuat otomatis.
+3. Salin `.env.example` menjadi `.env`, isi `DB_USER` / `DB_PASSWORD` sesuai MySQL Anda.
+4. Jalankan:
 
 ```bash
 npm install
@@ -118,4 +39,76 @@ npm start
 # buka http://localhost:3000
 ```
 
-Tanpa env var Redis, data disimpan di memori (hanya untuk testing).
+`npm start` menjalankan web + API + listener MQTT sekaligus. Hanya listener: `npm run listen`.
+
+| Env var | Default | Keterangan |
+|---|---|---|
+| `DB_HOST` | `localhost` | Host MySQL |
+| `DB_PORT` | `3306` | |
+| `DB_USER` | `root` | |
+| `DB_PASSWORD` | *(kosong)* | |
+| `DB_NAME` | `peter` | Nama database |
+| `MQTT_URL` | `mqtt://broker.hivemq.com:1883` | |
+| `MQTT_TOPIC` | `binus/garden/sensor/data` | |
+| `MQTT_LISTENER` | `true` | `false` = `npm start` tidak ikut menyimpan data MQTT |
+
+## Endpoint API
+
+| Method | Endpoint | Keterangan |
+|---|---|---|
+| GET | `/api/status` | Jenis database & jumlah data tersimpan |
+| GET | `/api/sensor/latest` | Data terbaru |
+| GET | `/api/sensor/history?page=1&per_page=10` | Riwayat data dengan filter & pagination (terbaru dulu, `per_page` maks 1000) |
+| GET | `/api/sensor/export` | Semua data sesuai filter (terlama dulu), dipakai tombol download |
+
+Filter (berlaku untuk `history` dan `export`):
+
+| Parameter | Nilai | Keterangan |
+|---|---|---|
+| `q` | teks | Cari di device, tanaman, soil %, soil raw, status air, status pompa, perintah |
+| `from` / `to` | tanggal ISO | Data dari `from` (termasuk) sampai sebelum `to` |
+| `soil` | `dry` / `wet` | Tanah kering / lembab |
+| `water` | `empty` / `ok` | Air tandon habis / ada |
+| `pump` | `ON` / `OFF` | Status pompa |
+
+Response `history`: `{ total_all, total, page, per_page, pages, records }` (`total` = jumlah data sesuai filter).
+| POST | `/api/sensor` | Simpan data lewat HTTP (opsional, untuk testing). Body sama dengan payload MQTT ESP32 |
+
+Contoh record (tanpa `temperature` / `humidity`):
+
+```json
+{
+  "id": 1,
+  "timestamp": "2026-10-21T13:06:48.999Z",
+  "device_id": "ESP32-BAMER-01",
+  "tanaman": "bawang_merah",
+  "soil_percent": 22,
+  "soil_raw": 2700,
+  "is_soil_dry": true,
+  "water_raw": 0,
+  "water_level_status": "EMPTY",
+  "is_water_empty": true,
+  "pump_status": "OFF",
+  "relay_d23": false,
+  "pump_command": "auto",
+  "pump_command_local": "auto"
+}
+```
+
+## Vercel
+
+Dashboard di Vercel tetap menampilkan data live lewat MQTT. Agar riwayat & download dari database jalan di Vercel,
+isi env var `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` dengan MySQL yang bisa diakses dari internet
+(MySQL lokal XAMPP tidak bisa dijangkau Vercel). Tanpa `DB_HOST`, API di Vercel memakai memori (hanya untuk testing),
+dan tombol download memakai data yang diterima dashboard selama halaman terbuka.
+
+## ESP32
+
+Sketch: [esp32/smart_garden_mqtt/smart_garden_mqtt.ino](esp32/smart_garden_mqtt/smart_garden_mqtt.ino)
+
+- Isi `ssid` dan `password` WiFi.
+- Library: PubSubClient, ArduinoJson (v7), DHT sensor library, Adafruit SSD1306, Adafruit GFX.
+- Publish data tiap 10 detik ke `binus/garden/sensor/data`, menerima perintah pompa dari `binus/garden/pump/cmd`.
+
+> `broker.hivemq.com` adalah broker publik: siapa pun yang tahu nama topik bisa membaca / mengirim data.
+> Cocok untuk prototipe; untuk produksi gunakan broker pribadi dengan username/password.

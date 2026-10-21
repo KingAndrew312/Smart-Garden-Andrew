@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tabel Data Sensor – Smart Garden</title>
+    <meta name="description" content="Riwayat data sensor Smart Garden: kelembapan tanah, air tandon, dan status pompa dengan pencarian, filter tanggal, pagination, serta download CSV/JSON.">
+    <meta name="keywords" content="data sensor, smart garden, ESP32, riwayat kelembapan tanah, download CSV, IoT">
+    <meta name="author" content="Smart Garden">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="canonical" href="https://smart-garden-andrew.vercel.app/data.html">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="apple-touch-icon" href="favicon.svg">
+
+    <!-- Open Graph / media sosial -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Smart Garden">
+    <meta property="og:locale" content="id_ID">
+    <meta property="og:url" content="https://smart-garden-andrew.vercel.app/data.html">
+    <meta property="og:title" content="Tabel Data Sensor – Smart Garden">
+    <meta property="og:description" content="Riwayat data sensor Smart Garden dengan pencarian, filter, dan download CSV/JSON.">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Tabel Data Sensor – Smart Garden">
+    <meta name="twitter:description" content="Riwayat data sensor Smart Garden dengan pencarian, filter, dan download CSV/JSON.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style type="text/tailwindcss">
+        .filter-input { @apply bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500; }
+        .page-btn { @apply min-w-[2rem] px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800; }
+        .page-btn.active { @apply bg-emerald-600 border-emerald-500 text-white; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-500/20 text-emerald-400">
+                <i class="fa-solid fa-seedling text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wide">Smart Garden</h1>
+                <p class="text-xs text-slate-400">Riwayat data sensor</p>
+            </div>
+            <nav class="flex gap-1 ml-4 text-sm">
+                <a href="index.html" class="px-3 py-1.5 rounded-lg text-slate-300 hover:bg-slate-800"><i class="fa-solid fa-gauge mr-1"></i>Dashboard</a>
+                <a href="data.html" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-semibold"><i class="fa-solid fa-table mr-1"></i>Tabel Data</a>
+            </nav>
+        </div>
+
+        <div class="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-lg border border-slate-800">
+            <i class="fa-solid fa-database text-slate-500"></i>
+            <span id="db-status" class="text-slate-400 text-xs">Database: mengecek...</span>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Tabel Data Sensor</h2>
+                    <span id="table-count" class="text-xs text-slate-500">-</span>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="loadTable()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700">
+                        <i class="fa-solid fa-rotate mr-1"></i>Refresh
+                    </button>
+                    <button onclick="download('csv')" title="Download semua data sesuai filter" class="px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500">
+                        <i class="fa-solid fa-file-csv mr-1"></i>Download CSV
+                    </button>
+                    <button onclick="download('json')" title="Download semua data sesuai filter" class="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700">
+                        <i class="fa-solid fa-file-code mr-1"></i>JSON
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter & pencarian -->
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4 text-xs">
+                <label class="col-span-2 flex flex-col gap-1 text-slate-500">Pencarian
+                    <input id="f-q" type="search" placeholder="Cari device, tanaman, status air/pompa, nilai soil..."
+                           class="filter-input w-full">
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Dari tanggal
+                    <input id="f-from" type="date" class="filter-input [color-scheme:dark]">
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Sampai tanggal
+                    <input id="f-to" type="date" class="filter-input [color-scheme:dark]">
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Tanah
+                    <select id="f-soil" class="filter-input">
+                        <option value="">Semua</option>
+                        <option value="dry">Kering</option>
+                        <option value="wet">Lembab</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Air tandon (water raw)
+                    <select id="f-water" class="filter-input">
+                        <option value="">Semua</option>
+                        <option value="ok">1 · Ada</option>
+                        <option value="empty">0 · Habis</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Pompa
+                    <select id="f-pump" class="filter-input">
+                        <option value="">Semua</option>
+                        <option value="ON">ON</option>
+                        <option value="OFF">OFF</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-1 text-slate-500">Baris per halaman
+                    <select id="f-per-page" class="filter-input">
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </label>
+                <div class="flex items-end">
+                    <button onclick="resetFilters()" class="w-full px-3 py-2 rounded-lg font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+                        <i class="fa-solid fa-filter-circle-xmark mr-1"></i>Reset filter
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border border-slate-800">
+                <table class="w-full text-sm text-left">
+                    <thead id="table-head" class="bg-slate-950 text-xs text-slate-400 uppercase"></thead>
+                    <tbody id="data-table" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-4 text-xs">
+                <span id="table-range" class="text-slate-500">-</span>
+                <div id="pagination" class="flex flex-wrap items-center gap-1"></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="js/common.js"></script>
+    <script>
+        const REFRESH_MS = 10000; // ESP32 publish tiap 10 detik
+
+        const table = { page: 1, perPage: 10, filters: {} };
+        let tableRequest = 0;
+
+        $('table-head').innerHTML = `<tr><th class="px-3 py-3">No</th>${COLUMNS.map(([, label]) => `<th class="px-3 py-3 whitespace-nowrap">${label}</th>`).join('')}</tr>`;
+
+        function renderTable(rows, total, pages) {
+            const offset = (table.page - 1) * table.perPage;
+            const filtered = Object.keys(table.filters).length > 0;
+
+            $('table-count').innerText = `${total} data${filtered ? ' (sesuai filter)' : ''}`;
+            $('table-range').innerText = total
+                ? `Menampilkan ${offset + 1}–${offset + rows.length} dari ${total} data · halaman ${table.page} / ${pages}`
+                : 'Tidak ada data';
+
+            $('data-table').innerHTML = rows.length
+                ? rows.map((r, i) => `
+                    <tr class="hover:bg-slate-800/50">
+                        <td class="px-3 py-2 text-slate-500">${offset + i + 1}</td>
+                        ${COLUMNS.map(([key]) => `<td class="px-3 py-2 whitespace-nowrap">${cell(key, r[key])}</td>`).join('')}
+                    </tr>`).join('')
+                : `<tr><td colspan="${COLUMNS.length + 1}" class="px-4 py-6 text-center text-slate-500">${filtered ? 'Tidak ada data yang cocok dengan filter' : 'Belum ada data'}</td></tr>`;
+
+            renderPagination(pages);
+        }
+
+        // Nomor halaman: 1 … 4 5 6 … 20
+        function renderPagination(pages) {
+            const cur = table.page;
+            const nums = [...new Set([1, cur - 1, cur, cur + 1, pages])].filter((p) => p >= 1 && p <= pages).sort((a, b) => a - b);
+            const btn = (label, page, { active = false, disabled = false } = {}) =>
+                `<button class="page-btn${active ? ' active' : ''}" ${disabled ? 'disabled' : ''} onclick="goPage(${page})">${label}</button>`;
+
+            let html = btn('<i class="fa-solid fa-angles-left"></i>', 1, { disabled: cur === 1 })
+                + btn('<i class="fa-solid fa-angle-left"></i>', cur - 1, { disabled: cur === 1 });
+            nums.forEach((p, i) => {
+                if (i > 0 && p - nums[i - 1] > 1) html += '<span class="px-1 text-slate-600">…</span>';
+                html += btn(p, p, { active: p === cur });
+            });
+            html += btn('<i class="fa-solid fa-angle-right"></i>', cur + 1, { disabled: cur === pages })
+                + btn('<i class="fa-solid fa-angles-right"></i>', pages, { disabled: cur === pages });
+            $('pagination').innerHTML = html;
+        }
+
+        function readFilters() {
+            const f = {};
+            const q = $('f-q').value.trim();
+            if (q) f.q = q;
+            // tanggal lokal -> ISO; "sampai" termasuk seluruh hari tersebut
+            if ($('f-from').value) f.from = new Date(`${$('f-from').value}T00:00:00`).toISOString();
+            if ($('f-to').value) {
+                const to = new Date(`${$('f-to').value}T00:00:00`);
+                to.setDate(to.getDate() + 1);
+                f.to = to.toISOString();
+            }
+            for (const key of ['soil', 'water', 'pump']) if ($(`f-${key}`).value) f[key] = $(`f-${key}`).value;
+            return f;
+        }
+
+        const filterQuery = (extra = {}) => new URLSearchParams({ ...table.filters, ...extra }).toString();
+
+        async function loadTable() {
+            const req = ++tableRequest;
+            try {
+                const res = await fetch(`${API_BASE}/api/sensor/history?${filterQuery({ page: table.page, per_page: table.perPage })}`, { signal: AbortSignal.timeout(8000) });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const body = await res.json();
+                if (req !== tableRequest) return; // ada request yang lebih baru
+                if (table.page > body.pages) { table.page = body.pages; return loadTable(); }
+                setDbStatus(body);
+                renderTable(body.records.map((r) => pick(r)), body.total, body.pages);
+            } catch (e) {
+                if (req !== tableRequest) return;
+                setDbStatus(null);
+                $('table-count').innerText = 'Gagal memuat data';
+                $('table-range').innerText = '-';
+                $('pagination').innerHTML = '';
+                $('data-table').innerHTML = `<tr><td colspan="${COLUMNS.length + 1}" class="px-4 py-6 text-center text-rose-400">Database tidak terhubung. Pastikan server (npm start) dan MySQL berjalan.</td></tr>`;
+            }
+        }
+
+        function applyFilters() {
+            table.filters = readFilters();
+            table.perPage = Number($('f-per-page').value);
+            table.page = 1;
+            loadTable();
+        }
+
+        function resetFilters() {
+            ['f-q', 'f-from', 'f-to', 'f-soil', 'f-water', 'f-pump'].forEach((id) => { $(id).value = ''; });
+            applyFilters();
+        }
+
+        function goPage(page) {
+            table.page = Math.max(page, 1);
+            loadTable();
+        }
+
+        let searchTimer = null;
+        $('f-q').addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(applyFilters, 400);
+        });
+        ['f-from', 'f-to', 'f-soil', 'f-water', 'f-pump', 'f-per-page'].forEach((id) => $(id).addEventListener('change', applyFilters));
+
+        // ===== Download (semua data sesuai filter, tanpa data DHT) =====
+        function saveFile(content, filename, type) {
+            const url = URL.createObjectURL(new Blob([content], { type }));
+            const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function toCsv(rows) {
+            const esc = (v) => {
+                const s = v === null || v === undefined ? '' : String(v);
+                return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+            };
+            const keys = ['id', ...COLUMNS.map(([key]) => key)];
+            const lines = rows.map((r) => keys.map((k) => esc(k === 'timestamp' ? fmtTime(r[k]) : r[k])).join(','));
+            return '﻿' + [keys.join(','), ...lines].join('\r\n');
+        }
+
+        async function download(format) {
+            let rows;
+            try {
+                const res = await fetch(`${API_BASE}/api/sensor/export?${filterQuery()}`, { signal: AbortSignal.timeout(30000) });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                // hanya kolom yang tampil di tabel
+                const keys = ['id', ...COLUMNS.map(([key]) => key)];
+                rows = (await res.json()).records.map((r) => Object.fromEntries(keys.map((k) => [k, r[k] ?? null])));
+            } catch (e) {
+                alert('Gagal mengambil data dari database.');
+                return;
+            }
+            if (!rows.length) { alert('Tidak ada data untuk di-download.'); return; }
+
+            const d = new Date();
+            const suffix = Object.keys(table.filters).length ? '-filter' : '';
+            const name = `smart-garden-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${suffix}`;
+            if (format === 'csv') saveFile(toCsv(rows), `${name}.csv`, 'text/csv;charset=utf-8');
+            else saveFile(JSON.stringify(rows, null, 2), `${name}.json`, 'application/json');
+        }
+
+        loadTable();
+        // Data baru masuk tiap 10 detik; perbarui hanya di halaman 1 supaya halaman yang sedang dibaca tidak bergeser
+        setInterval(() => { if (table.page === 1) loadTable(); }, REFRESH_MS);
+    </script>
+</body>
+</html>
