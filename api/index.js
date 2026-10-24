@@ -47,7 +47,7 @@ app.get('/api/sensor/latest', async (req, res) => {
     }
 });
 
-// Filter dari query string: ?q=&from=&to=&soil=dry|wet&water=empty|ok&pump=ON|OFF
+// Filter dari query string: ?q=&from=&to=&soil=dry|wet&water=empty|ok&pump=ON|OFF&light=dark|bright
 // from/to berupa tanggal ISO; data diambil dari from (termasuk) sampai sebelum to
 function parseFilters(query) {
     const toDate = (v) => {
@@ -61,7 +61,8 @@ function parseFilters(query) {
         to: toDate(query.to),
         soil: oneOf(query.soil, ['dry', 'wet']),
         water: oneOf(query.water, ['empty', 'ok']),
-        pump: oneOf(query.pump, ['ON', 'OFF'])
+        pump: oneOf(query.pump, ['ON', 'OFF']),
+        light: oneOf(query.light, ['dark', 'bright'])
     };
 }
 
@@ -101,7 +102,7 @@ app.get('/api/sensor/export', async (req, res) => {
     }
 });
 
-// Untuk server lokal (di Vercel tidak dijalankan)
+// Untuk server lokal / Docker (di Vercel tidak dijalankan)
 if (!process.env.VERCEL) {
     const path = require('path');
     const { startListener } = require('../lib/mqtt-listener');
@@ -113,9 +114,14 @@ if (!process.env.VERCEL) {
     }
     app.use('/js', express.static(path.join(root, 'js')));
 
+    // Alamat MQTT WebSocket untuk dashboard. Di Docker diisi "/mqtt" (broker di server yang sama lewat Nginx).
+    app.get('/config.js', (req, res) => {
+        res.type('application/javascript').send(`window.APP_CONFIG = ${JSON.stringify({ mqttWsUrl: process.env.MQTT_WS_URL || '' })};`);
+    });
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
-        console.log(`Server lokal berjalan di http://localhost:${PORT}`);
+        console.log(`Server berjalan di http://localhost:${PORT} (database: ${store.type})`);
         if (process.env.MQTT_LISTENER !== 'false') startListener();
     });
 }

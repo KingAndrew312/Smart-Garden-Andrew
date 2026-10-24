@@ -1,16 +1,16 @@
 {
   "name": "smart-garden",
   "version": "1.0.0",
-  "description": "Smart Garden - ESP32 MQTT + MySQL",
+  "description": "Smart Garden - ESP32 MQTT + InfluxDB",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
     "listen": "node lib/mqtt-listener.js"
   },
   "dependencies": {
+    "@influxdata/influxdb-client": "^1.35.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "mqtt": "^5.10.1",
-    "mysql2": "^3.11.0"
+    "mqtt": "^5.10.1"
   }
 }

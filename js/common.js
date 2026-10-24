@@ -4,22 +4,34 @@
 const API_BASE = '';
 const BATAS_KERING = 35;
 
-// Kolom yang tampil di tabel & di-download (data DHT temperature/humidity sengaja tidak dimasukkan)
+// Alamat MQTT WebSocket. Di server VPS (Docker) diisi "/mqtt" lewat /config.js,
+// artinya broker Mosquitto di IP/domain yang sama dengan dashboard. Tanpa config: HiveMQ publik.
+function mqttWsUrl() {
+    const url = window.APP_CONFIG?.mqttWsUrl;
+    if (!url) return 'wss://broker.hivemq.com:8884/mqtt';
+    if (url.startsWith('/')) return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${url}`;
+    return url;
+}
+
+// Kolom yang tampil di tabel & di-download.
+// Data DHT11 (temperature, humidity) dan DS18B20 suhu air (soil_temperature) sengaja tidak dimasukkan.
 const COLUMNS = [
     ['timestamp', 'Waktu'],
-    ['device_id', 'Device'],
-    ['tanaman', 'Tanaman'],
     ['soil_percent', 'Soil (%)'],
     ['soil_raw', 'Soil Raw'],
-    ['is_soil_dry', 'Tanah Kering'],
+    ['is_soil_dry', 'Tanah'],
     ['water_raw', 'Water Raw'],
     ['water_level_status', 'Status Air'],
     ['is_water_empty', 'Air Habis'],
-    ['pump_status', 'Pompa']
+    ['pump_status', 'Pompa'],
+    ['light_percent', 'Cahaya (%)'],
+    ['light_raw', 'LDR Raw'],
+    ['is_dark', 'Kondisi Cahaya'],
+    ['led_d2', 'LED D2']
 ];
 
-// Field tambahan yang hanya dipakai dashboard (kartu pompa & tombol kontrol), tidak tampil di tabel
-const EXTRA_FIELDS = ['relay_d23', 'pump_command', 'pump_command_local'];
+// Field tambahan yang hanya dipakai dashboard (tombol kontrol pompa), tidak tampil di tabel
+const EXTRA_FIELDS = ['pump_command'];
 
 const $ = (id) => document.getElementById(id);
 const pad = (n) => String(n).padStart(2, '0');
@@ -29,12 +41,16 @@ const fmtTime = (ts) => {
 };
 const escapeHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Ambil hanya field yang ditampilkan (membuang temperature & humidity)
+// Ambil hanya field yang ditampilkan (membuang data DHT & suhu air)
 function pick(data, timestamp) {
-    const r = { id: data.id ?? null };
+    const r = {};
     for (const [key] of COLUMNS) r[key] = data[key] ?? null;
     for (const key of EXTRA_FIELDS) r[key] = data[key] ?? null;
     r.timestamp = timestamp || data.timestamp || new Date().toISOString();
+
+    // Payload MQTT langsung dari ESP32 tidak membawa water_raw & is_soil_dry
+    if (r.water_raw === null && r.is_water_empty !== null) r.water_raw = r.is_water_empty ? 0 : 1;
+    if (r.is_soil_dry === null && r.soil_percent !== null) r.is_soil_dry = r.soil_percent < BATAS_KERING;
     return r;
 }
 
@@ -43,7 +59,6 @@ function isWaterEmpty(r) {
     if (r.water_raw === 0 || r.water_raw === 1) return r.water_raw === 0;
     return Boolean(r.is_water_empty);
 }
-const waterLabel = (raw) => (raw === 1 ? 'Ada' : raw === 0 ? 'Habis' : '-');
 
 function badge(text, color) {
     return `<span class="px-2 py-0.5 rounded-full text-xs bg-${color}-500/20 text-${color}-400">${escapeHtml(text)}</span>`;
@@ -59,6 +74,9 @@ function cell(key, value) {
         case 'is_water_empty': return value ? badge('Habis', 'rose') : badge('Ada', 'cyan');
         case 'water_level_status': return value === 'EMPTY' ? badge(value, 'rose') : badge(value, 'cyan');
         case 'pump_status': return value === 'ON' ? badge('ON', 'cyan') : badge('OFF', 'slate');
+        case 'light_percent': return `<span class="font-semibold text-yellow-400">${escapeHtml(value)}</span>`;
+        case 'is_dark': return value ? badge('Gelap', 'indigo') : badge('Terang', 'yellow');
+        case 'led_d2': return value === 'ON' ? badge('ON', 'yellow') : badge('OFF', 'slate');
         default: return escapeHtml(value);
     }
 }
@@ -72,8 +90,9 @@ function setDbStatus(body) {
         return;
     }
     const total = body.total_all ?? body.total;
-    el.innerText = body.database === 'mysql'
-        ? `Database ${body.name}: ${total} data tersimpan`
+    const online = body.database !== 'memory';
+    el.innerText = online
+        ? `InfluxDB (${body.name}): ${total} data tersimpan`
         : `Database belum diset (memori): ${total} data`;
-    el.className = `text-xs ${body.database === 'mysql' ? 'text-emerald-400' : 'text-amber-400'}`;
+    el.className = `text-xs ${online ? 'text-emerald-400' : 'text-amber-400'}`;
 }

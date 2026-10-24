@@ -79,7 +79,7 @@
     <div id="alarm" class="hidden max-w-7xl w-full mx-auto px-6 pt-6">
         <div class="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl px-4 py-3 text-sm flex items-center gap-3">
             <i class="fa-solid fa-triangle-exclamation text-lg"></i>
-            <span><b>Peringatan:</b> air tandon habis dan tanah kering. Pompa tidak bisa menyiram, segera isi tandon.</span>
+            <span id="alarm-text"></span>
         </div>
     </div>
 
@@ -124,13 +124,13 @@
 
         <div class="lg:col-span-2 space-y-6 flex flex-col">
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-4">
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
                     <div id="water-icon" class="p-3 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20"><i class="fa-solid fa-bucket text-xl"></i></div>
                     <div>
                         <p class="text-xs text-slate-400">Air Tandon</p>
                         <h4 id="val-water" class="text-xl font-bold">-</h4>
-                        <p class="text-xs text-slate-500">water_raw: <span id="val-water-raw">-</span> <span class="text-slate-600">(1 = ada, 0 = habis)</span></p>
+                        <p class="text-xs text-slate-500">water_raw: <span id="val-water-raw">-</span> <span class="text-slate-600">(1 ada, 0 habis)</span></p>
                     </div>
                 </div>
 
@@ -139,23 +139,32 @@
                     <div>
                         <p class="text-xs text-slate-400">Pompa</p>
                         <h4 id="val-pump" class="text-xl font-bold">-</h4>
-                        <p class="text-xs text-slate-500">Relay D23: <span id="val-relay">-</span></p>
+                        <p class="text-xs text-slate-500">Perintah: <span id="val-command">-</span></p>
                     </div>
                 </div>
 
                 <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
-                    <div class="p-3 bg-violet-500/10 text-violet-400 rounded-xl border border-violet-500/20"><i class="fa-solid fa-microchip text-xl"></i></div>
-                    <div class="min-w-0">
-                        <p class="text-xs text-slate-400">Perangkat</p>
-                        <h4 id="val-device" class="text-base font-bold truncate">-</h4>
-                        <p class="text-xs text-slate-500 truncate">Tanaman: <span id="val-tanaman">-</span></p>
+                    <div id="light-icon" class="p-3 bg-yellow-500/10 text-yellow-400 rounded-xl border border-yellow-500/20"><i class="fa-solid fa-sun text-xl"></i></div>
+                    <div>
+                        <p class="text-xs text-slate-400">Cahaya (LDR)</p>
+                        <h4 id="val-light" class="text-xl font-bold">-</h4>
+                        <p class="text-xs text-slate-500"><span id="val-light-state">-</span> · raw <span id="val-light-raw">-</span></p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center gap-4">
+                    <div id="led-icon" class="p-3 bg-slate-500/10 text-slate-400 rounded-xl border border-slate-500/20"><i class="fa-solid fa-lightbulb text-xl"></i></div>
+                    <div>
+                        <p class="text-xs text-slate-400">LED D2</p>
+                        <h4 id="val-led" class="text-xl font-bold">-</h4>
+                        <p class="text-xs text-slate-500">Nyala otomatis saat gelap</p>
                     </div>
                 </div>
             </div>
 
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex-1 flex flex-col">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Grafik Kelembapan Tanah & Pompa</h3>
+                    <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Grafik Kelembapan Tanah, Cahaya & Pompa</h3>
                     <span class="text-xs text-slate-500">Update terakhir: <span id="last-update" class="text-emerald-400 font-mono">-</span></span>
                 </div>
                 <div class="relative flex-1 w-full min-h-[280px]">
@@ -178,10 +187,11 @@
 
     </main>
 
+    <!-- config.js disediakan server (Docker/lokal); di hosting statis tidak ada dan dashboard memakai HiveMQ -->
+    <script src="config.js"></script>
     <script src="js/common.js"></script>
     <script>
-        // HiveMQ public broker lewat WebSocket (wss supaya jalan di https / Vercel)
-        const MQTT_WS_URL = 'wss://broker.hivemq.com:8884/mqtt';
+        const MQTT_WS_URL = mqttWsUrl();
         const TOPIC_DATA = 'binus/garden/sensor/data';
         const TOPIC_CMD = 'binus/garden/pump/cmd';
 
@@ -216,6 +226,15 @@
                         fill: true,
                         stepped: true,
                         pointRadius: 0
+                    },
+                    {
+                        label: 'Cahaya (%)',
+                        data: [],
+                        borderColor: '#facc15',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0.4
                     },
                     {
                         label: 'Batas Kering',
@@ -274,16 +293,31 @@
             $('water-icon').className = `p-3 rounded-xl border ${empty ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'}`;
 
             const on = r.pump_status === 'ON';
-            $('val-pump').innerText = `${r.pump_status || '-'} · ${r.pump_command || '-'}`;
+            $('val-pump').innerText = r.pump_status || '-';
             $('val-pump').className = `text-xl font-bold ${on ? 'text-cyan-400' : 'text-slate-200'}`;
-            $('val-relay').innerText = r.relay_d23 ? 'aktif' : 'mati';
+            $('val-command').innerText = r.pump_command || '-';
             $('pump-icon').className = `p-3 rounded-xl border ${on ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`;
 
-            $('val-device').innerText = r.device_id || '-';
-            $('val-tanaman').innerText = (r.tanaman || '-').replace(/_/g, ' ');
+            const dark = Boolean(r.is_dark);
+            $('val-light').innerText = r.light_percent === null ? '-' : `${r.light_percent}%`;
+            $('val-light-state').innerText = r.light_percent === null ? '-' : (dark ? 'Gelap' : 'Terang');
+            $('val-light-raw').innerText = r.light_raw ?? '-';
+            $('light-icon').className = `p-3 rounded-xl border ${dark ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'}`;
+            $('light-icon').innerHTML = `<i class="fa-solid ${dark ? 'fa-moon' : 'fa-sun'} text-xl"></i>`;
+
+            const ledOn = r.led_d2 === 'ON';
+            $('val-led').innerText = r.led_d2 || '-';
+            $('val-led').className = `text-xl font-bold ${ledOn ? 'text-yellow-400' : 'text-slate-200'}`;
+            $('led-icon').className = `p-3 rounded-xl border ${ledOn ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20'}`;
+
             $('last-update').innerText = fmtTime(r.timestamp);
 
-            $('alarm').classList.toggle('hidden', !(empty && dry));
+            // Sama dengan buzzer di ESP32 (ALARM_BUTUH_KEDUANYA = false): bunyi bila air habis ATAU tanah kering
+            const alarm = empty && dry ? 'air tandon habis dan tanah kering. Pompa tidak bisa menyiram, segera isi tandon.'
+                : empty ? 'air tandon habis, segera isi tandon.'
+                : dry ? 'tanah kering, perlu disiram.' : '';
+            $('alarm-text').innerHTML = alarm ? `<b>Peringatan:</b> ${alarm}` : '';
+            $('alarm').classList.toggle('hidden', !alarm);
 
             if (pendingCommand && r.pump_command === pendingCommand) {
                 pendingCommand = null;
@@ -297,7 +331,8 @@
             soilChart.data.labels = ordered.map((r) => new Date(r.timestamp).toLocaleTimeString());
             soilChart.data.datasets[0].data = ordered.map((r) => r.soil_percent);
             soilChart.data.datasets[1].data = ordered.map((r) => (r.pump_status === 'ON' ? 100 : 0));
-            soilChart.data.datasets[2].data = ordered.map(() => BATAS_KERING);
+            soilChart.data.datasets[2].data = ordered.map((r) => r.light_percent);
+            soilChart.data.datasets[3].data = ordered.map(() => BATAS_KERING);
             soilChart.update();
         }
 

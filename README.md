@@ -1,56 +1,86 @@
-# Smart Garden – ESP32 + MQTT
+# Smart Garden – ESP32 + MQTT + InfluxDB (Docker)
 
-Dashboard: **https://smart-garden-andrew.vercel.app**
+Semua berjalan di satu VPS **47.254.170.208** dengan Docker:
 
-Alur data:
+| Alamat | Untuk |
+|---|---|
+| `http://47.254.170.208` | Dashboard & tabel data |
+| `ws://47.254.170.208/mqtt` | MQTT WebSocket untuk dashboard (live & kontrol pompa) |
+| `mqtt://47.254.170.208:1883` | MQTT untuk ESP32 |
 
 ```
-ESP32 --publish binus/garden/sensor/data--> broker.hivemq.com
-                                              |            |
-                       (WebSocket, live)      |            |  (TCP)
-                Dashboard (browser) <---------+            +---> MQTT listener (npm start / npm run listen)
-                       |  publish binus/garden/pump/cmd                 |
-                       v                                                v
-                     ESP32                                    MySQL database "peter"
-                                                                        |
-                Dashboard <--- GET /api/sensor/history, /api/sensor/export
+ESP32 --publish--> Mosquitto (VPS :1883) --+--> app (listener) --> InfluxDB
+  ^      (juga ke broker.hivemq.com)       |
+  |                                        +--> Nginx /mqtt --> Dashboard (browser, live)
+  +---- binus/garden/pump/cmd <-------------------------------- tombol Auto / ON / OFF
 ```
 
-- **Data live** & **kontrol pompa** (`auto` / `pump_on` / `pump_off`) langsung lewat MQTT dari browser.
-- **Penyimpanan**: listener MQTT menyimpan setiap data ke MySQL database `peter`, tabel `sensor_data`.
-- **Halaman**: `index.html` (dashboard live, grafik, kontrol pompa) dan `data.html` (tabel riwayat dengan pencarian, filter, pagination & download).
-- **Air tandon**: `water_raw` 1 = air ada, 0 = air habis (float switch).
-- **Tampil & download**: semua field ditampilkan dan bisa di-download (CSV / JSON) **kecuali data DHT11**
-  (`temperature`, `humidity`). Data DHT tetap tersimpan di database, hanya tidak ditampilkan / di-download.
+| Container | Image | Keterangan |
+|---|---|---|
+| `mosquitto` | eclipse-mosquitto 2.0 | Broker MQTT. Port 1883 terbuka untuk ESP32, WebSocket 9001 hanya lewat Nginx |
+| `influxdb` | influxdb 2.7 | Database time-series. UI hanya di `127.0.0.1:8086` (tidak terbuka ke internet) |
+| `app` | build dari `Dockerfile` | Web, API, dan listener MQTT → InfluxDB |
+| `nginx` | nginx 1.27 | Port 80: `/` → app, `/mqtt` → Mosquitto WebSocket |
 
-> Vercel (serverless) tidak bisa menjalankan subscriber MQTT terus-menerus, jadi listener harus jalan di komputer/server
-> yang selalu menyala (mis. `npm start` di laptop dengan XAMPP).
+## Data yang ditampilkan
 
-## Jalankan lokal (XAMPP)
+Semua data sensor tampil di dashboard, tabel, dan download, **kecuali**:
 
-1. Jalankan **MySQL** dari XAMPP Control Panel.
-2. (Opsional) import [database/peter.sql](database/peter.sql) lewat phpMyAdmin. Kalau tidak, database `peter` dan tabelnya dibuat otomatis.
-3. Salin `.env.example` menjadi `.env`, isi `DB_USER` / `DB_PASSWORD` sesuai MySQL Anda.
-4. Jalankan:
+- DHT11: `temperature`, `humidity`
+- DS18B20 suhu air: `soil_temperature`
+
+Ketiganya tetap disimpan di InfluxDB.
+
+- **Halaman**: `index.html` (dashboard live, grafik, kontrol pompa) dan `data.html` (tabel riwayat dengan pencarian, filter, pagination & download CSV/JSON).
+- **Air tandon**: `water_raw` 1 = air ada, 0 = air habis. Firmware tidak mengirim `water_raw`, jadi dihitung dari `is_water_empty`.
+- **Tanah kering**: `is_soil_dry` dihitung dari `soil_percent < 35`.
+- **Cahaya**: `light_percent`, `light_raw` (LDR), `is_dark` (gelap/terang), `led_d2`.
+
+## Deploy di VPS
+
+Butuh Docker + Docker Compose di VPS. Buka port **80** dan **1883** di firewall / security group VPS.
+
+```bash
+git clone <repo> smart-garden && cd smart-garden
+cp .env.example .env
+nano .env          # isi INFLUX_PASSWORD (min. 8 karakter) & INFLUX_TOKEN (mis. hasil: openssl rand -hex 32)
+docker compose up -d --build
+docker compose logs -f app    # harus muncul "[MQTT] Terhubung" lalu "[DB] Tersimpan: ..."
+```
+
+Buka `http://47.254.170.208`.
+
+Update setelah ada perubahan kode:
+
+```bash
+git pull && docker compose up -d --build app
+```
+
+Buka UI InfluxDB dari laptop lewat SSH tunnel:
+
+```bash
+ssh -L 8086:localhost:8086 user@47.254.170.208
+# lalu buka http://localhost:8086 (login INFLUX_USERNAME / INFLUX_PASSWORD)
+```
+
+> `INFLUX_USERNAME`, `INFLUX_PASSWORD`, `INFLUX_ORG`, `INFLUX_BUCKET`, `INFLUX_TOKEN` hanya dipakai saat InfluxDB
+> pertama kali dibuat. Untuk menggantinya setelah itu, ubah lewat UI InfluxDB atau hapus volume (`docker compose down -v`, **data hilang**).
+
+## Struktur data InfluxDB
+
+- Bucket: `garden` (`INFLUX_BUCKET`), measurement: `sensor_data`, tag: `device`
+- Field: `soil_percent`, `soil_raw`, `soil_temperature`, `temperature`, `humidity`, `water_raw`, `water_level_status`,
+  `is_water_empty`, `is_soil_dry`, `pump_status`, `pump_command`, `light_raw`, `light_percent`, `is_dark`, `led_d2`
+
+## Jalankan di laptop (tanpa Docker)
 
 ```bash
 npm install
-npm start
-# buka http://localhost:3000
+npm start      # http://localhost:3000
 ```
 
-`npm start` menjalankan web + API + listener MQTT sekaligus. Hanya listener: `npm run listen`.
-
-| Env var | Default | Keterangan |
-|---|---|---|
-| `DB_HOST` | `localhost` | Host MySQL |
-| `DB_PORT` | `3306` | |
-| `DB_USER` | `root` | |
-| `DB_PASSWORD` | *(kosong)* | |
-| `DB_NAME` | `peter` | Nama database |
-| `MQTT_URL` | `mqtt://broker.hivemq.com:1883` | |
-| `MQTT_TOPIC` | `binus/garden/sensor/data` | |
-| `MQTT_LISTENER` | `true` | `false` = `npm start` tidak ikut menyimpan data MQTT |
+Tanpa `INFLUX_URL` di `.env`, data disimpan di memori (hilang saat server berhenti). Untuk memakai broker & database
+di VPS dari laptop, isi `MQTT_URL`, `MQTT_WS_URL`, dan `INFLUX_URL` di `.env` (lihat `.env.example`).
 
 ## Endpoint API
 
@@ -60,55 +90,33 @@ npm start
 | GET | `/api/sensor/latest` | Data terbaru |
 | GET | `/api/sensor/history?page=1&per_page=10` | Riwayat data dengan filter & pagination (terbaru dulu, `per_page` maks 1000) |
 | GET | `/api/sensor/export` | Semua data sesuai filter (terlama dulu), dipakai tombol download |
+| POST | `/api/sensor` | Simpan data lewat HTTP (opsional, untuk testing). Body sama dengan payload MQTT ESP32 |
+| GET | `/config.js` | Alamat MQTT WebSocket untuk dashboard (`MQTT_WS_URL`) |
 
 Filter (berlaku untuk `history` dan `export`):
 
 | Parameter | Nilai | Keterangan |
 |---|---|---|
-| `q` | teks | Cari di device, tanaman, soil %, soil raw, status air, status pompa, perintah |
+| `q` | teks | Cari di soil %, soil raw, status air, status pompa, cahaya %, LDR raw, LED D2 |
 | `from` / `to` | tanggal ISO | Data dari `from` (termasuk) sampai sebelum `to` |
 | `soil` | `dry` / `wet` | Tanah kering / lembab |
-| `water` | `empty` / `ok` | Air tandon habis / ada |
+| `water` | `empty` / `ok` | `water_raw` 0 (habis) / 1 (ada) |
 | `pump` | `ON` / `OFF` | Status pompa |
+| `light` | `dark` / `bright` | Gelap / terang |
 
 Response `history`: `{ total_all, total, page, per_page, pages, records }` (`total` = jumlah data sesuai filter).
-| POST | `/api/sensor` | Simpan data lewat HTTP (opsional, untuk testing). Body sama dengan payload MQTT ESP32 |
-
-Contoh record (tanpa `temperature` / `humidity`):
-
-```json
-{
-  "id": 1,
-  "timestamp": "2026-10-21T13:06:48.999Z",
-  "device_id": "ESP32-BAMER-01",
-  "tanaman": "bawang_merah",
-  "soil_percent": 22,
-  "soil_raw": 2700,
-  "is_soil_dry": true,
-  "water_raw": 0,
-  "water_level_status": "EMPTY",
-  "is_water_empty": true,
-  "pump_status": "OFF",
-  "relay_d23": false,
-  "pump_command": "auto",
-  "pump_command_local": "auto"
-}
-```
-
-## Vercel
-
-Dashboard di Vercel tetap menampilkan data live lewat MQTT. Agar riwayat & download dari database jalan di Vercel,
-isi env var `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` dengan MySQL yang bisa diakses dari internet
-(MySQL lokal XAMPP tidak bisa dijangkau Vercel). Tanpa `DB_HOST`, API di Vercel memakai memori (hanya untuk testing),
-dan tombol download memakai data yang diterima dashboard selama halaman terbuka.
 
 ## ESP32
 
 Sketch: [esp32/smart_garden_mqtt/smart_garden_mqtt.ino](esp32/smart_garden_mqtt/smart_garden_mqtt.ino)
 
 - Isi `ssid` dan `password` WiFi.
-- Library: PubSubClient, ArduinoJson (v7), DHT sensor library, Adafruit SSD1306, Adafruit GFX.
-- Publish data tiap 10 detik ke `binus/garden/sensor/data`, menerima perintah pompa dari `binus/garden/pump/cmd`.
+- Library: PubSubClient, ArduinoJson (v7), DHT sensor library, Adafruit SSD1306, Adafruit GFX, OneWire, DallasTemperature.
+- Publish tiap 10 detik ke Mosquitto VPS (`47.254.170.208:1883`) **dan** `broker.hivemq.com`.
+  Yang disimpan ke InfluxDB hanya data dari broker VPS, jadi tidak dobel.
 
-> `broker.hivemq.com` adalah broker publik: siapa pun yang tahu nama topik bisa membaca / mengirim data.
-> Cocok untuk prototipe; untuk produksi gunakan broker pribadi dengan username/password.
+## Keamanan
+
+Mosquitto masih `allow_anonymous true` (ESP32 belum memakai username/password), jadi siapa pun yang tahu IP & topik
+bisa membaca data atau mengirim perintah pompa. Untuk produksi: aktifkan password Mosquitto (`mosquitto_passwd`),
+isi `mqtt_user` / `mqtt_password` di ESP32, dan pasang domain + HTTPS di Nginx.
